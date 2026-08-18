@@ -22,8 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: hacs/action@main
+        env:
+          # Needed to read repository content through the GitHub API.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           category: integration
+          # Custom integrations are not listed in home-assistant/brands.
+          ignore: brands
 
   ruff:
     name: ruff

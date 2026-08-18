@@ -9,7 +9,7 @@
           "api_token": "API token"
         },
         "data_description": {
-          "base_url": "Your Helm server's versioned API root, ending in /api/v1 — for example https://helm.example.com/api/v1",
+          "base_url": "Your Helm server's versioned API root, ending in /api/v1",
           "api_token": "The full token, starting with helm_."
         }
       },

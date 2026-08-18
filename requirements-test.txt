@@ -1,3 +1,4 @@
 homeassistant
+home-assistant-frontend
 pytest-homeassistant-custom-component
 ruff

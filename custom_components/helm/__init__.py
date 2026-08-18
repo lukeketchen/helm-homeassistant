@@ -13,7 +13,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_API_TOKEN, Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.loader import async_get_loaded_integration
@@ -40,6 +40,10 @@ from .services import async_setup_services
 _LOGGER = logging.getLogger(__name__)
 
 EXPIRY_CHECK_INTERVAL = timedelta(hours=12)
+
+# Helm is configured entirely from the UI; async_setup exists only to register
+# the services and the frontend card.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 @dataclass
