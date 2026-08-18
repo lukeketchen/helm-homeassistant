@@ -1,0 +1,258 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Helm",
+        "description": "Create a credential in Helm under Settings → Account → API credentials. The token is shown only once, at creation.",
+        "data": {
+          "base_url": "Base URL",
+          "api_token": "API token"
+        },
+        "data_description": {
+          "base_url": "Your Helm server's versioned API root, ending in /api/v1 — for example https://helm.example.com/api/v1",
+          "api_token": "The full token, starting with helm_."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect to Helm",
+        "description": "The credential for {base_url} is no longer accepted. Issue a new one in Helm under Settings → Account → API credentials and paste it below.",
+        "data": {
+          "api_token": "API token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the Helm API. Check the base URL and that the server is up.",
+      "invalid_auth": "The token was rejected. It may be unknown, revoked, expired, or owned by a child account.",
+      "invalid_token_format": "Helm tokens start with helm_.",
+      "rate_limited": "Helm is rate limiting this connection. Wait a minute and try again.",
+      "no_abilities": "The token authenticated but carries none of the planning:read, shopping:read or shopping:write abilities.",
+      "unknown": "Unexpected error. Check the Home Assistant log for details."
+    },
+    "abort": {
+      "already_configured": "This Helm server is already configured.",
+      "reauth_successful": "Helm reconnected successfully."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Helm options",
+        "data": {
+          "days_ahead": "Days ahead to load",
+          "days_past": "Days of history to load",
+          "update_interval": "Update interval",
+          "qty_in_summary": "Show quantity in shopping list item names"
+        },
+        "data_description": {
+          "days_ahead": "How far forward the calendars and sensors keep data cached.",
+          "days_past": "How far back to keep data cached, for looking at what already happened.",
+          "update_interval": "How often to poll Helm. Each poll uses six requests against a 60/minute limit.",
+          "qty_in_summary": "Appends ×2 to an item's name, and reads a trailing ×2 back into the quantity when you add or rename an item."
+        }
+      }
+    }
+  },
+  "entity": {
+    "calendar": {
+      "calendar_schedule": {
+        "name": "Schedule"
+      },
+      "calendar_meal": {
+        "name": "Meals"
+      },
+      "calendar_exercise": {
+        "name": "Exercise"
+      },
+      "calendar_event": {
+        "name": "Events"
+      },
+      "calendar_chore": {
+        "name": "Chores"
+      },
+      "calendar_habit": {
+        "name": "Habits"
+      }
+    },
+    "todo": {
+      "shopping_list": {
+        "name": "Shopping list"
+      }
+    },
+    "sensor": {
+      "next_up": {
+        "name": "Next up"
+      },
+      "agenda_today": {
+        "name": "Today"
+      },
+      "meals_today": {
+        "name": "Meals today"
+      },
+      "exercises_today": {
+        "name": "Exercise today"
+      },
+      "events_today": {
+        "name": "Events today"
+      },
+      "chores_today": {
+        "name": "Chores today"
+      },
+      "habits_today": {
+        "name": "Habits today"
+      },
+      "chores_outstanding": {
+        "name": "Chores outstanding"
+      },
+      "habits_outstanding": {
+        "name": "Habits outstanding"
+      },
+      "shopping_outstanding": {
+        "name": "Shopping list outstanding"
+      },
+      "shopping_total": {
+        "name": "Shopping list total"
+      },
+      "credential_expires": {
+        "name": "Credential expires"
+      }
+    }
+  },
+  "services": {
+    "add_shopping_item": {
+      "name": "Add shopping item",
+      "description": "Adds an item to the shared shopping list, including the fields the to-do card cannot set.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Helm account",
+          "description": "Which Helm connection to use. Give this or an entity."
+        },
+        "entity_id": {
+          "name": "Helm entity",
+          "description": "Any entity from the Helm connection to use, instead of naming the connection itself."
+        },
+        "name": {
+          "name": "Name",
+          "description": "The item name. Maximum 255 characters."
+        },
+        "qty": {
+          "name": "Quantity",
+          "description": "How many to buy."
+        },
+        "shopping_list_type_id": {
+          "name": "Category ID",
+          "description": "A shopping list category belonging to the same household."
+        },
+        "url": {
+          "name": "URL",
+          "description": "A link to attach to the item."
+        },
+        "visible_to_extended": {
+          "name": "Visible to extended family",
+          "description": "Forced on for extended-family tokens."
+        },
+        "idempotency_key": {
+          "name": "Idempotency key",
+          "description": "Replay guard. Reusing a key with the same body returns the original item instead of creating a duplicate."
+        }
+      }
+    },
+    "update_shopping_item": {
+      "name": "Update shopping item",
+      "description": "Updates one shopping list item. Only the fields you supply are sent.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Helm account",
+          "description": "Which Helm connection to use. Give this or an entity."
+        },
+        "entity_id": {
+          "name": "Helm entity",
+          "description": "Any entity from the Helm connection to use, instead of naming the connection itself."
+        },
+        "item_id": {
+          "name": "Item ID",
+          "description": "The item's Helm ID, visible in the shopping list sensor attributes."
+        },
+        "name": {
+          "name": "Name",
+          "description": "A new name for the item."
+        },
+        "qty": {
+          "name": "Quantity",
+          "description": "A new quantity."
+        },
+        "shopping_list_type_id": {
+          "name": "Category ID",
+          "description": "A new category."
+        },
+        "url": {
+          "name": "URL",
+          "description": "A new link."
+        },
+        "completed": {
+          "name": "Completed",
+          "description": "Tick or untick the item. Sending only this field works even for accounts that may tick but not edit."
+        },
+        "sort_order": {
+          "name": "Sort order",
+          "description": "Position in the list."
+        },
+        "visible_to_extended": {
+          "name": "Visible to extended family",
+          "description": "Whether extended family can see this item."
+        }
+      }
+    },
+    "delete_shopping_item": {
+      "name": "Delete shopping item",
+      "description": "Removes one item from the shared shopping list.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Helm account",
+          "description": "Which Helm connection to use. Give this or an entity."
+        },
+        "entity_id": {
+          "name": "Helm entity",
+          "description": "Any entity from the Helm connection to use, instead of naming the connection itself."
+        },
+        "item_id": {
+          "name": "Item ID",
+          "description": "The item's Helm ID."
+        }
+      }
+    },
+    "get_planning": {
+      "name": "Get planning",
+      "description": "Returns planning occurrences for a date range. Ranges longer than 31 days are chunked automatically.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Helm account",
+          "description": "Which Helm connection to use. Give this or an entity."
+        },
+        "entity_id": {
+          "name": "Helm entity",
+          "description": "Any entity from the Helm connection to use, instead of naming the connection itself."
+        },
+        "from": {
+          "name": "From",
+          "description": "First day of the range. Defaults to today in the household's timezone."
+        },
+        "to": {
+          "name": "To",
+          "description": "Last day of the range, inclusive. Defaults to the from date."
+        },
+        "types": {
+          "name": "Types",
+          "description": "Limit the result to certain occurrence types. Defaults to all of them."
+        }
+      }
+    }
+  },
+  "exceptions": {},
+  "issues": {
+    "token_expiring": {
+      "title": "Helm credential expiring soon",
+      "description": "The Helm credential \"{credential}\" used by {name} expires at {expires_at}. Issue a new one in Helm under Settings → Account → API credentials, then reconfigure the integration to avoid losing your calendars and shopping list."
+    }
+  }
+}

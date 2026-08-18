@@ -1,0 +1,133 @@
+add_shopping_item:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: helm
+    entity_id:
+      example: todo.helm_shopping_list
+      selector:
+        entity:
+          integration: helm
+    name:
+      required: true
+      example: Milk
+      selector:
+        text:
+    qty:
+      selector:
+        number:
+          min: 1
+          max: 999
+          mode: box
+    shopping_list_type_id:
+      selector:
+        number:
+          min: 1
+          mode: box
+    url:
+      selector:
+        text:
+          type: url
+    visible_to_extended:
+      selector:
+        boolean:
+    idempotency_key:
+      advanced: true
+      selector:
+        text:
+
+update_shopping_item:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: helm
+    entity_id:
+      example: todo.helm_shopping_list
+      selector:
+        entity:
+          integration: helm
+    item_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
+    name:
+      selector:
+        text:
+    qty:
+      selector:
+        number:
+          min: 1
+          max: 999
+          mode: box
+    shopping_list_type_id:
+      selector:
+        number:
+          min: 1
+          mode: box
+    url:
+      selector:
+        text:
+          type: url
+    completed:
+      selector:
+        boolean:
+    sort_order:
+      selector:
+        number:
+          min: 0
+          mode: box
+    visible_to_extended:
+      selector:
+        boolean:
+
+delete_shopping_item:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: helm
+    entity_id:
+      example: todo.helm_shopping_list
+      selector:
+        entity:
+          integration: helm
+    item_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
+
+get_planning:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: helm
+    entity_id:
+      example: todo.helm_shopping_list
+      selector:
+        entity:
+          integration: helm
+    from:
+      example: "2026-08-18"
+      selector:
+        date:
+    to:
+      example: "2026-08-24"
+      selector:
+        date:
+    types:
+      selector:
+        select:
+          multiple: true
+          options:
+            - meal
+            - exercise
+            - event
+            - chore
+            - habit
