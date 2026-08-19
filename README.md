@@ -14,13 +14,39 @@ in `configuration.yaml` or `secrets.yaml`.
 
 | Platform | Entities |
 |---|---|
-| **Calendar** | `calendar.helm_schedule` (everything merged) plus one each for meals, exercise, events, chores and habits |
+| **Calendar** | One per household member, plus Household, a merged Schedule, and one per type (meals, exercise, events, chores, habits) |
 | **To-do** | `todo.helm_shopping_list` — the shared household list, with add, rename, tick and delete |
 | **Sensor** | Next up, today's totals per type, chores/habits still outstanding, shopping list counts, credential expiry |
 | **Card** | `custom:helm-shopping-card` — a shopping list card with quantities, categories and recipe links |
 
 Every entity is attached to a single **Helm** service device, so they group
 together in the UI.
+
+### Calendars
+
+Three ways to slice the same data:
+
+| Calendar | Holds |
+|---|---|
+| `calendar.helm_<name>` | Everything that person is involved in — one per household member |
+| `calendar.helm_household` | Items with nobody attached, like an unassigned family event |
+| `calendar.helm_schedule` | Everything, merged |
+| `calendar.helm_meals` *(and exercise, events, chores, habits)* | One planning type each |
+
+**An occurrence appears on the calendar of every person attached to it.** A
+dinner you both eat shows on both calendars; separate lunches show on one each.
+Nothing is duplicated in Helm — it's the same occurrence, filtered per person.
+
+Who counts as attached depends on the type: meals and exercises use `owner` plus
+`participants`, events and chores use `assignees`, and habits use `owner`.
+
+The member list comes from `team.members` on `/me`, so calendars stay put
+whether or not someone has anything scheduled that week. People are keyed by
+type **and** ID — a `user` with ID 4 and a `family_member` with ID 4 are
+different people.
+
+Add a household member in Helm and they appear after the integration reloads
+(`/me` is re-read on every load, so restarting Home Assistant is enough).
 
 ### Sensors
 
@@ -285,9 +311,9 @@ Add to the shopping list by voice, via the standard to-do intents:
 
 ## How it talks to the API
 
-- **One `/me` call at setup**, for identity, abilities and the household
-  timezone. Nothing after that — abilities and expiry are fixed when a
-  credential is issued.
+- **One `/me` call per load**, for identity, the member roster, abilities and
+  the household timezone. Nothing after that, so a roster change costs one
+  request at the next reload rather than ongoing polling.
 - **Two coordinators.** One polls the five typed planning endpoints in parallel
   and merges them locally; the other polls the shopping list. Six requests per
   cycle, ~1.2/minute at the default interval, against a 60/minute budget.

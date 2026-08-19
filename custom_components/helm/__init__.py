@@ -13,13 +13,14 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_API_TOKEN, Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.loader import async_get_loaded_integration
 from homeassistant.util import dt as dt_util
 
-from .api import HelmClient
+from .api import HelmAuthError, HelmClient, HelmError
 from .const import (
     ABILITY_PLANNING_READ,
     ABILITY_SHOPPING_READ,
@@ -112,6 +113,35 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
+async def _async_refresh_identity(
+    hass: HomeAssistant, entry: HelmConfigEntry, client: HelmClient
+) -> None:
+    """Re-read /me so roster and ability changes are picked up on reload.
+
+    A household member added in Helm becomes a calendar the next time this
+    entry loads. Servers without /me, or a server that is simply down, leave
+    the stored values in place — the coordinator's first refresh reports any
+    real connectivity problem.
+    """
+    try:
+        me = await client.async_get_me()
+    except HelmAuthError as err:
+        raise ConfigEntryAuthFailed(err.message) from err
+    except HelmError as err:
+        _LOGGER.debug("Could not refresh identity from /me: %s", err)
+        return
+
+    updates = {
+        CONF_ABILITIES: sorted(me.get("abilities") or []),
+        CONF_USER: me.get("user"),
+        CONF_TEAM: me.get("team"),
+        CONF_TIMEZONE: me.get("timezone"),
+        CONF_CREDENTIAL: me.get("credential"),
+    }
+    if any(entry.data.get(key) != value for key, value in updates.items()):
+        hass.config_entries.async_update_entry(entry, data={**entry.data, **updates})
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: HelmConfigEntry) -> bool:
     """Set up Helm from a config entry."""
     client = HelmClient(
@@ -119,6 +149,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: HelmConfigEntry) -> bool
         entry.data[CONF_BASE_URL],
         entry.data[CONF_API_TOKEN],
     )
+
+    await _async_refresh_identity(hass, entry, client)
 
     abilities = set(entry.data.get(CONF_ABILITIES, []))
     runtime = HelmRuntimeData(

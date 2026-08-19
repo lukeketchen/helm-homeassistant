@@ -26,7 +26,14 @@ TOKEN = "helm_" + "a" * 68
 ALL_ABILITIES = ["planning:read", "shopping:read", "shopping:write"]
 
 USER = {"id": 4, "name": "Luke", "role": "member"}
-TEAM = {"id": 1, "name": "Ketchen"}
+
+LUKE = {"type": "user", "id": 4, "name": "Luke"}
+SAM = {"type": "user", "id": 5, "name": "Sam"}
+# Same numeric ID as Luke, different type - these must not be confused.
+JACK = {"type": "family_member", "id": 4, "name": "Jack"}
+MEMBERS = [LUKE, SAM, JACK]
+
+TEAM = {"id": 1, "name": "Ketchen", "members": MEMBERS}
 CREDENTIAL = {"name": "Home Assistant", "expires_at": None}
 
 WRITE_PROBE_URL = f"{BASE_URL}/shopping-list/items/2147483647"
@@ -44,27 +51,35 @@ def _meta(today: date) -> dict[str, Any]:
 
 
 def planning_fixture(today: date) -> dict[str, list[dict[str, Any]]]:
-    """Return one occurrence per planning endpoint for today."""
+    """Return occurrences covering shared, personal and unattributed items."""
     stamp = today.isoformat()
+
+    def meal(id_, title, hour, owner, participants):
+        return {
+            "id": id_,
+            "type": "meal",
+            "title": title,
+            "date": stamp,
+            "starts_at": f"{stamp}T{hour}:00+10:00",
+            "all_day": False,
+            "meal_time": "dinner" if hour.startswith("18") else "lunch",
+            "url": None,
+            "owner": owner,
+            "participants": participants,
+            "source": "meal_plan",
+        }
+
     return {
         "meals": [
-            {
-                "id": 1,
-                "type": "meal",
-                "title": "Lasagne",
-                "date": stamp,
-                "starts_at": f"{stamp}T18:30:00+10:00",
-                "all_day": False,
-                "meal_time": "dinner",
-                "url": "https://example.com/lasagne",
-                "owner": {"type": "user", "id": 4, "name": "Luke"},
-                "participants": [{"type": "user", "id": 4, "name": "Luke"}],
-                "source": "meal_plan",
-            }
+            # Eaten together - must appear on both Luke's and Sam's calendars.
+            meal(1, "Lasagne", "18:30", LUKE, [LUKE, SAM]),
+            # Separate lunches - one calendar each.
+            meal(2, "Chicken wrap", "12:30", LUKE, [LUKE]),
+            meal(3, "Sushi", "12:30", SAM, [SAM]),
         ],
         "exercises": [
             {
-                "id": 2,
+                "id": 10,
                 "type": "exercise",
                 "title": "Run",
                 "date": stamp,
@@ -73,14 +88,29 @@ def planning_fixture(today: date) -> dict[str, list[dict[str, Any]]]:
                 "duration_minutes": 45,
                 "subtype": "cardio",
                 "category": "running",
-                "owner": {"type": "user", "id": 4, "name": "Luke"},
+                "owner": LUKE,
                 "participants": [],
                 "source": "routine",
-            }
+            },
+            {
+                "id": 11,
+                "type": "exercise",
+                "title": "Yoga",
+                "date": stamp,
+                "starts_at": f"{stamp}T16:15:00+10:00",
+                "all_day": False,
+                "duration_minutes": 60,
+                "subtype": None,
+                "category": None,
+                "owner": SAM,
+                "participants": [SAM],
+                "source": "routine",
+            },
         ],
         "events": [
+            # Nobody assigned - belongs on the household calendar.
             {
-                "id": 3,
+                "id": 20,
                 "type": "event",
                 "title": "School concert",
                 "date": stamp,
@@ -101,11 +131,12 @@ def planning_fixture(today: date) -> dict[str, list[dict[str, Any]]]:
                 "starts_at": f"{stamp}T19:00:00+10:00",
                 "all_day": False,
                 "completed": False,
-                "assignees": [{"type": "user", "id": 4, "name": "Luke"}],
+                "assignees": [JACK],
                 "source": "chores",
             }
         ],
         "habits": [
+            # Habits now carry an owner, always the token owner.
             {
                 "id": 7,
                 "type": "habit",
@@ -114,6 +145,7 @@ def planning_fixture(today: date) -> dict[str, list[dict[str, Any]]]:
                 "starts_at": None,
                 "all_day": True,
                 "completed": True,
+                "owner": LUKE,
                 "source": "habits",
             }
         ],
@@ -172,6 +204,7 @@ def mock_api(
     write: bool = True,
     me: dict[str, Any] | None = None,
     me_status: int = 200,
+    expires_at: str | None = None,
 ) -> None:
     """Register the whole API surface, honouring the abilities under test."""
     if me_status == 200:
@@ -182,7 +215,9 @@ def mock_api(
             abilities.append("shopping:read")
         if shopping and write:
             abilities.append("shopping:write")
-        aioclient_mock.get(f"{BASE_URL}/me", json=me or me_payload(abilities))
+        aioclient_mock.get(
+            f"{BASE_URL}/me", json=me or me_payload(abilities, expires_at)
+        )
     else:
         aioclient_mock.get(
             f"{BASE_URL}/me",
@@ -269,7 +304,13 @@ async def setup_helm(
     """
     await hass.config.async_set_time_zone(HOUSEHOLD_TZ)
     today = dt_util.now().date()
-    mock_api(aioclient_mock, today=today, **abilities)
+    stored = entry.data.get(CONF_CREDENTIAL) or {}
+    mock_api(
+        aioclient_mock,
+        today=today,
+        expires_at=stored.get("expires_at"),
+        **abilities,
+    )
 
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)

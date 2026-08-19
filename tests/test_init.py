@@ -50,8 +50,8 @@ async def test_sensor_values(
     """Counts reflect the fixture, and completion is honoured."""
     await setup_helm(hass, aioclient_mock, config_entry)
 
-    assert hass.states.get("sensor.helm_today").state == "5"
-    assert hass.states.get("sensor.helm_meals_today").state == "1"
+    assert hass.states.get("sensor.helm_today").state == "8"
+    assert hass.states.get("sensor.helm_meals_today").state == "3"
     # The chore is not completed, the habit is.
     assert hass.states.get("sensor.helm_chores_outstanding").state == "1"
     assert hass.states.get("sensor.helm_habits_outstanding").state == "0"
@@ -109,7 +109,16 @@ async def test_calendar_event_shapes(
         event["summary"]: event for event in events["calendar.helm_schedule"]["events"]
     }
 
-    assert set(found) == {"Lasagne", "Run", "School concert", "Bins out", "Read"}
+    assert set(found) == {
+        "Lasagne",
+        "Chicken wrap",
+        "Sushi",
+        "Run",
+        "Yoga",
+        "School concert",
+        "Bins out",
+        "Read",
+    }
     # All-day entries come back as bare dates spanning one day.
     assert found["School concert"]["start"] == today.isoformat()
     assert found["School concert"]["end"] == (today + timedelta(days=1)).isoformat()

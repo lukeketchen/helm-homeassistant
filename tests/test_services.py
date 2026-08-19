@@ -116,12 +116,19 @@ async def test_get_planning_returns_occurrences(
         return_response=True,
     )
 
-    assert response["count"] == 5
+    assert response["count"] == 8
     assert response["meta"]["timezone"] == "Australia/Sydney"
     titles = [item["title"] for item in response["occurrences"]]
     # All-day entries first (alphabetically), then by start time.
     assert titles[:2] == ["Read", "School concert"]
-    assert titles[2:] == ["Run", "Lasagne", "Bins out"]
+    assert titles[2:] == [
+        "Run",
+        "Chicken wrap",
+        "Sushi",
+        "Yoga",
+        "Lasagne",
+        "Bins out",
+    ]
 
 
 async def test_get_planning_filters_by_type(

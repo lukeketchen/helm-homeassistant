@@ -72,6 +72,9 @@
       },
       "calendar_habit": {
         "name": "Habits"
+      },
+      "calendar_household": {
+        "name": "Household"
       }
     },
     "todo": {

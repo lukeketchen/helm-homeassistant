@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_EVENT_MINUTES, PLANNING_TYPES
+from .const import CONF_TEAM, DEFAULT_EVENT_MINUTES, PLANNING_TYPES
 from .coordinator import HelmPlanningCoordinator
 from .entity import HelmEntity
 
@@ -18,45 +18,91 @@ if TYPE_CHECKING:
     from . import HelmConfigEntry
 
 
+def person_key(person: dict[str, Any]) -> str:
+    """Identify a person by type and ID.
+
+    A `user` with ID 4 and a `family_member` with ID 4 are different people,
+    so the type is part of the key.
+    """
+    return f"{person.get('type')}:{person.get('id')}"
+
+
+def occurrence_people(occurrence: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return everyone attached to an occurrence, de-duplicated.
+
+    Meals and exercises carry `owner` plus `participants`, events and chores
+    carry `assignees`, and habits carry `owner` alone.
+    """
+    people: dict[str, dict[str, Any]] = {}
+
+    owner = occurrence.get("owner")
+    if isinstance(owner, dict) and owner.get("id") is not None:
+        people[person_key(owner)] = owner
+
+    for field in ("participants", "assignees"):
+        for person in occurrence.get(field) or []:
+            if isinstance(person, dict) and person.get("id") is not None:
+                people.setdefault(person_key(person), person)
+
+    return list(people.values())
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: HelmConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up one calendar per planning type, plus a merged one."""
+    """Set up per-type, per-person, household and merged calendars."""
     coordinator = entry.runtime_data.planning
     if coordinator is None:
         return
 
-    entities: list[HelmCalendarEntity] = [
-        HelmCalendarEntity(coordinator, entry, planning_type)
+    entities: list[HelmBaseCalendar] = [
+        HelmTypeCalendar(coordinator, entry, planning_type)
         for planning_type in PLANNING_TYPES
     ]
-    entities.append(HelmCalendarEntity(coordinator, entry, None))
+    entities.append(HelmScheduleCalendar(coordinator, entry))
+
+    # One calendar per household member, from the roster /me hands back, so
+    # entities stay put whether or not someone has anything scheduled.
+    members = (entry.data.get(CONF_TEAM) or {}).get("members") or []
+    entities.extend(
+        HelmPersonCalendar(coordinator, entry, member)
+        for member in members
+        if isinstance(member, dict) and member.get("id") is not None
+    )
+    if members:
+        entities.append(HelmHouseholdCalendar(coordinator, entry))
+
     async_add_entities(entities)
 
 
-class HelmCalendarEntity(HelmEntity, CalendarEntity):
-    """A calendar backed by one planning type, or by all of them."""
+class HelmBaseCalendar(HelmEntity, CalendarEntity):
+    """Shared behaviour for every Helm calendar.
+
+    Subclasses choose which planning types to request and which occurrences
+    within them to keep.
+    """
 
     coordinator: HelmPlanningCoordinator
 
-    def __init__(
-        self,
-        coordinator: HelmPlanningCoordinator,
-        entry: HelmConfigEntry,
-        planning_type: str | None,
-    ) -> None:
-        """Initialise the calendar."""
-        key = planning_type or "schedule"
-        super().__init__(coordinator, entry, f"calendar_{key}")
-        self._planning_type = planning_type
-        self._attr_translation_key = f"calendar_{key}"
-
     @property
     def _types(self) -> list[str]:
-        """Return the planning types this calendar covers."""
-        return [self._planning_type] if self._planning_type else list(PLANNING_TYPES)
+        """Planning types this calendar draws from."""
+        return list(PLANNING_TYPES)
+
+    def _include(self, occurrence: dict[str, Any]) -> bool:
+        """Whether an occurrence belongs on this calendar."""
+        return True
+
+    def _cached_occurrences(self) -> list[dict[str, Any]]:
+        """Return cached occurrences for this calendar, in display order."""
+        source = (
+            self.coordinator.occurrences(self._types[0])
+            if len(self._types) == 1
+            else self.coordinator.all_occurrences()
+        )
+        return [occurrence for occurrence in source if self._include(occurrence)]
 
     @property
     def event(self) -> CalendarEvent | None:
@@ -83,12 +129,6 @@ class HelmCalendarEntity(HelmEntity, CalendarEntity):
         """Expose the timezone the range was resolved in."""
         return {"timezone": self.coordinator.timezone_name}
 
-    def _cached_occurrences(self) -> list[dict[str, Any]]:
-        """Return the coordinator's cached occurrences for this calendar."""
-        if self._planning_type:
-            return self.coordinator.occurrences(self._planning_type)
-        return self.coordinator.all_occurrences()
-
     async def async_get_events(
         self, hass: HomeAssistant, start_date: datetime, end_date: datetime
     ) -> list[CalendarEvent]:
@@ -98,8 +138,93 @@ class HelmCalendarEntity(HelmEntity, CalendarEntity):
         end = end_date.astimezone(tz).date()
 
         occurrences = await self.coordinator.async_fetch_range(start, end, self._types)
-        events = [event for occ in occurrences if (event := _to_calendar_event(occ))]
+        events = [
+            event
+            for occurrence in occurrences
+            if self._include(occurrence) and (event := _to_calendar_event(occurrence))
+        ]
         return [event for event in events if _overlaps(event, start_date, end_date)]
+
+
+class HelmTypeCalendar(HelmBaseCalendar):
+    """Every occurrence of one planning type."""
+
+    def __init__(
+        self,
+        coordinator: HelmPlanningCoordinator,
+        entry: HelmConfigEntry,
+        planning_type: str,
+    ) -> None:
+        """Initialise the calendar."""
+        super().__init__(coordinator, entry, f"calendar_{planning_type}")
+        self._planning_type = planning_type
+        self._attr_translation_key = f"calendar_{planning_type}"
+
+    @property
+    def _types(self) -> list[str]:
+        """Only this calendar's planning type."""
+        return [self._planning_type]
+
+
+class HelmScheduleCalendar(HelmBaseCalendar):
+    """Everything, merged."""
+
+    _attr_translation_key = "calendar_schedule"
+
+    def __init__(
+        self, coordinator: HelmPlanningCoordinator, entry: HelmConfigEntry
+    ) -> None:
+        """Initialise the calendar."""
+        super().__init__(coordinator, entry, "calendar_schedule")
+
+
+class HelmPersonCalendar(HelmBaseCalendar):
+    """Everything one household member is involved in.
+
+    An occurrence lands on the calendar of every person attached to it, so a
+    dinner you both eat shows on both calendars while your separate lunches
+    show on one each.
+    """
+
+    def __init__(
+        self,
+        coordinator: HelmPlanningCoordinator,
+        entry: HelmConfigEntry,
+        person: dict[str, Any],
+    ) -> None:
+        """Initialise the calendar."""
+        key = person_key(person).replace(":", "_")
+        super().__init__(coordinator, entry, f"calendar_person_{key}")
+        self._person_key = person_key(person)
+        self._attr_name = person.get("name") or "Unknown"
+
+    def _include(self, occurrence: dict[str, Any]) -> bool:
+        """Keep occurrences this person is attached to."""
+        return any(
+            person_key(person) == self._person_key
+            for person in occurrence_people(occurrence)
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose who this calendar is for."""
+        return {**super().extra_state_attributes, "person": self._person_key}
+
+
+class HelmHouseholdCalendar(HelmBaseCalendar):
+    """Occurrences that belong to nobody in particular."""
+
+    _attr_translation_key = "calendar_household"
+
+    def __init__(
+        self, coordinator: HelmPlanningCoordinator, entry: HelmConfigEntry
+    ) -> None:
+        """Initialise the calendar."""
+        super().__init__(coordinator, entry, "calendar_household")
+
+    def _include(self, occurrence: dict[str, Any]) -> bool:
+        """Keep only unattributed occurrences."""
+        return not occurrence_people(occurrence)
 
 
 def _as_datetimes(event: CalendarEvent, tzinfo: Any) -> tuple[datetime, datetime]:
@@ -163,15 +288,9 @@ def _to_calendar_event(occurrence: dict[str, Any]) -> CalendarEvent | None:
     )
 
 
-def _names(people: Any) -> str:
-    """Join participant names from a Helm people array."""
-    if not isinstance(people, list):
-        return ""
-    return ", ".join(
-        person["name"]
-        for person in people
-        if isinstance(person, dict) and person.get("name")
-    )
+def _names(people: list[dict[str, Any]]) -> str:
+    """Join people's names."""
+    return ", ".join(person["name"] for person in people if person.get("name"))
 
 
 def _describe(occurrence: dict[str, Any]) -> str | None:
@@ -190,10 +309,7 @@ def _describe(occurrence: dict[str, Any]) -> str | None:
         lines.append(f"Duration: {duration} min")
     if (completed := occurrence.get("completed")) is not None:
         lines.append("Completed: yes" if completed else "Completed: no")
-    owner = occurrence.get("owner")
-    if isinstance(owner, dict) and owner.get("name"):
-        lines.append(f"Owner: {owner['name']}")
-    if people := _names(occurrence.get("assignees") or occurrence.get("participants")):
+    if people := _names(occurrence_people(occurrence)):
         lines.append(f"Who: {people}")
     if details := occurrence.get("details"):
         lines.append(str(details))
