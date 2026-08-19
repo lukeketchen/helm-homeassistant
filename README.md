@@ -30,6 +30,7 @@ Three ways to slice the same data:
 |---|---|
 | `calendar.helm_<name>` | Everything that person is involved in — one per household member |
 | `calendar.helm_household` | Items with nobody attached, like an unassigned family event |
+| `calendar.helm_shared` | Anything involving two or more people — family dinners, joint outings |
 | `calendar.helm_schedule` | Everything, merged |
 | `calendar.helm_meals` *(and exercise, events, chores, habits)* | One planning type each |
 
@@ -53,6 +54,45 @@ different people.
 
 Add a household member in Helm and they appear after the integration reloads
 (`/me` is re-read on every load, so restarting Home Assistant is enough).
+
+If Helm lists somebody twice — once as a `user` and once as a `family_member` —
+they are treated as one person and get one calendar covering both identities,
+matched on name. Two people sharing a full name would need distinguishing in
+Helm.
+
+### Dashboard recipes
+
+The Home Assistant calendar card takes several entities at once, so the views
+you want are a matter of which ones you combine.
+
+**A personal calendar for your phone** — meals, exercise, events, habits and
+chores, everything you're involved in and nothing you aren't:
+
+```yaml
+type: calendar
+title: My week
+initial_view: listWeek
+entities:
+  - calendar.helm_luke
+```
+
+**A kitchen tablet** — what the household needs, plus everyone's exercise, but
+not anyone's work events or solo meals:
+
+```yaml
+type: calendar
+title: Kitchen
+initial_view: listWeek
+entities:
+  - calendar.helm_shared      # family dinners, joint outings
+  - calendar.helm_exercise    # everyone's workouts
+  - calendar.helm_chores      # who is doing what
+  - calendar.helm_household   # unassigned family events
+```
+
+Solo meals stay off it because they involve one person, and a work event
+assigned only to you is likewise excluded. Turn on **Show who items are for** so
+the shared card reads `Yoga — Sam` at a glance.
 
 ### Sensors
 

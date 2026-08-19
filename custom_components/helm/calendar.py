@@ -56,6 +56,46 @@ def occurrence_people(occurrence: dict[str, Any]) -> list[dict[str, Any]]:
     return list(people.values())
 
 
+def group_by_human(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse roster entries that are the same person into one.
+
+    Helm can list somebody twice — once as the `user` who owns things and once
+    as a `family_member` who participates in them. That is one human and should
+    be one calendar holding everything, not two holding half each. Entries are
+    matched on name; a household with two people sharing a full name would need
+    them distinguished in Helm.
+    """
+    humans: dict[str, dict[str, Any]] = {}
+
+    for member in members:
+        if not isinstance(member, dict) or member.get("id") is None:
+            continue
+        name = str(member.get("name") or "").strip()
+        if not name:
+            continue
+        human = humans.setdefault(
+            name.casefold(), {"name": name, "keys": set(), "identities": []}
+        )
+        human["keys"].add(person_key(member))
+        human["identities"].append(member)
+
+    return list(humans.values())
+
+
+def _stable_identity(human: dict[str, Any]) -> str:
+    """Pick the identity a person's entity ID is built from.
+
+    A `user` account is the more durable identity, so prefer it; otherwise take
+    the lowest key so the choice does not depend on roster ordering.
+    """
+    users = sorted(
+        person_key(identity)
+        for identity in human["identities"]
+        if identity.get("type") == "user"
+    )
+    return users[0] if users else sorted(human["keys"])[0]
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: HelmConfigEntry,
@@ -75,13 +115,11 @@ async def async_setup_entry(
     # One calendar per household member, from the roster /me hands back, so
     # entities stay put whether or not someone has anything scheduled.
     members = (entry.data.get(CONF_TEAM) or {}).get("members") or []
-    entities.extend(
-        HelmPersonCalendar(coordinator, entry, member)
-        for member in members
-        if isinstance(member, dict) and member.get("id") is not None
-    )
-    if members:
+    humans = group_by_human(members)
+    entities.extend(HelmPersonCalendar(coordinator, entry, human) for human in humans)
+    if humans:
         entities.append(HelmHouseholdCalendar(coordinator, entry))
+        entities.append(HelmSharedCalendar(coordinator, entry))
 
     async_add_entities(entities)
 
@@ -216,25 +254,49 @@ class HelmPersonCalendar(HelmBaseCalendar):
         self,
         coordinator: HelmPlanningCoordinator,
         entry: HelmConfigEntry,
-        person: dict[str, Any],
+        human: dict[str, Any],
     ) -> None:
         """Initialise the calendar."""
-        key = person_key(person).replace(":", "_")
-        super().__init__(coordinator, entry, f"calendar_person_{key}")
-        self._person_key = person_key(person)
-        self._attr_name = person.get("name") or "Unknown"
+        slug = _stable_identity(human).replace(":", "_")
+        super().__init__(coordinator, entry, f"calendar_person_{slug}")
+        # Every identity this person holds, so nothing of theirs is missed.
+        self._person_keys: set[str] = set(human["keys"])
+        self._attr_name = human["name"]
 
     def _include(self, occurrence: dict[str, Any]) -> bool:
-        """Keep occurrences this person is attached to."""
+        """Keep occurrences any of this person's identities are attached to."""
         return any(
-            person_key(person) == self._person_key
+            person_key(person) in self._person_keys
             for person in occurrence_people(occurrence)
         )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose who this calendar is for."""
-        return {**super().extra_state_attributes, "person": self._person_key}
+        """Expose which identities this calendar covers."""
+        return {
+            **super().extra_state_attributes,
+            "person": sorted(self._person_keys),
+        }
+
+
+class HelmSharedCalendar(HelmBaseCalendar):
+    """Occurrences involving more than one person.
+
+    A dinner you all eat, a joint outing, a chore two people share — but not
+    anyone's solo lunch or personal workout.
+    """
+
+    _attr_translation_key = "calendar_shared"
+
+    def __init__(
+        self, coordinator: HelmPlanningCoordinator, entry: HelmConfigEntry
+    ) -> None:
+        """Initialise the calendar."""
+        super().__init__(coordinator, entry, "calendar_shared")
+
+    def _include(self, occurrence: dict[str, Any]) -> bool:
+        """Keep occurrences with two or more distinct people."""
+        return len(distinct_names(occurrence_people(occurrence))) >= 2
 
 
 class HelmHouseholdCalendar(HelmBaseCalendar):
@@ -330,9 +392,24 @@ def _to_calendar_event(
     )
 
 
+def distinct_names(people: list[dict[str, Any]]) -> list[str]:
+    """Return one name per human, in order.
+
+    The same person can reach an occurrence under two identities — as the
+    `user` who owns it and as a `family_member` who participates in it. They
+    are one human, so they are named once and counted once.
+    """
+    names: dict[str, str] = {}
+    for person in people:
+        name = person.get("name")
+        if name:
+            names.setdefault(str(name).casefold(), str(name))
+    return list(names.values())
+
+
 def _names(people: list[dict[str, Any]]) -> str:
-    """Join people's names."""
-    return ", ".join(person["name"] for person in people if person.get("name"))
+    """Join people's names, one entry per human."""
+    return ", ".join(distinct_names(people))
 
 
 def _describe(occurrence: dict[str, Any]) -> str | None:

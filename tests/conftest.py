@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import date, timedelta
 from typing import Any
 
@@ -31,7 +32,9 @@ LUKE = {"type": "user", "id": 4, "name": "Luke"}
 SAM = {"type": "user", "id": 5, "name": "Sam"}
 # Same numeric ID as Luke, different type - these must not be confused.
 JACK = {"type": "family_member", "id": 4, "name": "Jack"}
-MEMBERS = [LUKE, SAM, JACK]
+# Luke again, as Helm also lists him among the family members. One human.
+LUKE_AS_FAMILY = {"type": "family_member", "id": 7, "name": "Luke"}
+MEMBERS = [LUKE, SAM, JACK, LUKE_AS_FAMILY]
 
 TEAM = {"id": 1, "name": "Ketchen", "members": MEMBERS}
 CREDENTIAL = {"name": "Home Assistant", "expires_at": None}
@@ -72,9 +75,9 @@ def planning_fixture(today: date) -> dict[str, list[dict[str, Any]]]:
     return {
         "meals": [
             # Eaten together - must appear on both Luke's and Sam's calendars.
-            meal(1, "Lasagne", "18:30", LUKE, [LUKE, SAM]),
+            meal(1, "Lasagne", "18:30", LUKE, [LUKE, LUKE_AS_FAMILY, SAM]),
             # Separate lunches - one calendar each.
-            meal(2, "Chicken wrap", "12:30", LUKE, [LUKE]),
+            meal(2, "Chicken wrap", "12:30", LUKE, [LUKE, LUKE_AS_FAMILY]),
             meal(3, "Sushi", "12:30", SAM, [SAM]),
         ],
         "exercises": [
@@ -183,16 +186,22 @@ SHOPPING_FIXTURE = [
 def me_payload(
     abilities: list[str] | None = None, expires_at: str | None = None
 ) -> dict[str, Any]:
-    """Build a /me response."""
-    return {
-        "data": {
-            "user": USER,
-            "team": TEAM,
-            "abilities": abilities if abilities is not None else ALL_ABILITIES,
-            "timezone": HOUSEHOLD_TZ,
-            "credential": {**CREDENTIAL, "expires_at": expires_at},
+    """Build a /me response.
+
+    Deep-copied so a test that edits the payload cannot corrupt the shared
+    fixture constants for every test that runs after it.
+    """
+    return deepcopy(
+        {
+            "data": {
+                "user": USER,
+                "team": TEAM,
+                "abilities": abilities if abilities is not None else ALL_ABILITIES,
+                "timezone": HOUSEHOLD_TZ,
+                "credential": {**CREDENTIAL, "expires_at": expires_at},
+            }
         }
-    }
+    )
 
 
 def mock_api(
@@ -271,8 +280,8 @@ def _entry(abilities: list[str], expires_at: str | None = None) -> MockConfigEnt
             CONF_BASE_URL: BASE_URL,
             CONF_API_TOKEN: TOKEN,
             CONF_ABILITIES: abilities,
-            CONF_USER: USER,
-            CONF_TEAM: TEAM,
+            CONF_USER: deepcopy(USER),
+            CONF_TEAM: deepcopy(TEAM),
             CONF_TIMEZONE: HOUSEHOLD_TZ,
             CONF_CREDENTIAL: {**CREDENTIAL, "expires_at": expires_at},
         },

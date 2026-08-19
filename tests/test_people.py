@@ -9,7 +9,11 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.helm.calendar import occurrence_people, person_key
+from custom_components.helm.calendar import (
+    distinct_names,
+    occurrence_people,
+    person_key,
+)
 from custom_components.helm.const import (
     CONF_SHOW_PEOPLE,
     CONF_TEAM,
@@ -17,7 +21,15 @@ from custom_components.helm.const import (
     SHOW_PEOPLE_SUFFIX,
 )
 
-from .conftest import JACK, LUKE, SAM, me_payload, mock_api, setup_helm
+from .conftest import (
+    JACK,
+    LUKE,
+    LUKE_AS_FAMILY,
+    SAM,
+    me_payload,
+    mock_api,
+    setup_helm,
+)
 
 
 async def _summaries(hass: HomeAssistant, entity_id: str, today) -> set[str]:
@@ -153,7 +165,7 @@ async def test_person_calendar_state_and_attributes(
 
     state = hass.states.get("calendar.helm_sam")
     assert state.attributes["friendly_name"] == "Helm Sam"
-    assert state.attributes["person"] == "user:5"
+    assert state.attributes["person"] == ["user:5"]
 
 
 async def test_roster_change_is_picked_up_on_reload(
@@ -290,3 +302,101 @@ async def test_person_and_household_calendars_stay_clean(
     assert await _summaries(hass, "calendar.helm_household", today) == {
         "School concert"
     }
+
+
+def test_one_name_per_human() -> None:
+    """The same person under two identities is named once, not twice."""
+    people = occurrence_people(
+        {"owner": LUKE, "participants": [LUKE, LUKE_AS_FAMILY, SAM]}
+    )
+    # Both identities are kept for membership...
+    assert len(people) == 3
+    # ...but they are one human when naming or counting.
+    assert distinct_names(people) == ["Luke", "Sam"]
+
+
+async def test_names_are_not_doubled_up(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """Being both a user and a family member must not print the name twice."""
+    today = await _setup_with_people(
+        hass, aioclient_mock, config_entry, SHOW_PEOPLE_SUFFIX
+    )
+
+    summaries = await _summaries(hass, "calendar.helm_schedule", today)
+    assert "Chicken wrap — Luke" in summaries
+    assert "Chicken wrap — Luke, Luke" not in summaries
+    assert "Lasagne — Luke, Sam" in summaries
+
+
+async def test_shared_calendar_needs_two_real_people(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """A solo lunch is not shared, even with the person listed twice."""
+    today = await setup_helm(hass, aioclient_mock, config_entry)
+
+    shared = await _summaries(hass, "calendar.helm_shared", today)
+    assert "Lasagne" in shared
+    # Luke appears as user and family member here, but is still one person.
+    assert "Chicken wrap" not in shared
+    assert "Sushi" not in shared
+    assert "Run" not in shared
+
+
+async def test_a_dual_identity_person_keeps_their_items(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """Naming by human must not drop membership by identity."""
+    today = await setup_helm(hass, aioclient_mock, config_entry)
+
+    luke = await _summaries(hass, "calendar.helm_luke", today)
+    assert {"Chicken wrap", "Lasagne"} <= luke
+
+
+async def test_one_calendar_per_human_not_per_identity(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """Luke is on the roster twice, but gets one calendar holding everything."""
+    await setup_helm(hass, aioclient_mock, config_entry)
+
+    lukes = [
+        state.entity_id
+        for state in hass.states.async_all("calendar")
+        if (state.attributes.get("friendly_name") or "").endswith("Luke")
+    ]
+    assert lukes == ["calendar.helm_luke"], lukes
+
+    # The calendar covers both of his identities.
+    assert hass.states.get("calendar.helm_luke").attributes["person"] == [
+        "family_member:7",
+        "user:4",
+    ]
+
+
+async def test_merged_person_gets_items_from_either_identity(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """Nothing is lost by merging: items reach Luke under either identity."""
+    today = await setup_helm(hass, aioclient_mock, config_entry)
+
+    luke = await _summaries(hass, "calendar.helm_luke", today)
+    # Owned as user:4, and participated in as family_member:7.
+    assert {"Chicken wrap", "Lasagne", "Run", "Read"} <= luke
+    # Still nothing of Sam's or Jack's.
+    assert "Sushi" not in luke
+    assert "Bins out" not in luke
