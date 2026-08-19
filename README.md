@@ -334,6 +334,12 @@ Add to the shopping list by voice, via the standard to-do intents:
   a month view; that becomes two calls, transparently.
 - **Cache first.** A calendar range already inside the cached window is served
   without a request. Only ranges outside it hit the network.
+- **Identical fetches are shared.** Opening a calendar view asks every calendar
+  entity for the same window at once, and the per-person calendars all need the
+  same underlying data. Those requests are collapsed into one per planning type
+  and briefly reused, so a month view across ten calendars costs ten requests
+  rather than sixty. Raising **Days ahead** to 30 makes most month views free
+  entirely, at no extra polling cost.
 - **Recurring occurrences.** `id` repeats across days, so calendar UIDs are
   `{type}-{id}-{date}`.
 - **Rate limits and errors** surface as `UpdateFailed` (entities go unavailable

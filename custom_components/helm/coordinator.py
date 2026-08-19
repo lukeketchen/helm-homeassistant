@@ -33,6 +33,10 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# How long an arbitrary-range result is reused. Long enough to collapse the
+# burst of requests the calendar panel makes when it opens.
+RANGE_CACHE_TTL = 30.0
+
 
 def _update_interval(entry: ConfigEntry) -> timedelta:
     """Return the poll interval configured for this entry."""
@@ -68,6 +72,11 @@ class HelmPlanningCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
         self.timezone: tzinfo | None = None
         self.window_start: date | None = None
         self.window_end: date | None = None
+        # (type, start, end) -> (timestamp, occurrences), and in-flight fetches.
+        self._range_cache: dict[
+            tuple[str, date, date], tuple[float, list[dict[str, Any]]]
+        ] = {}
+        self._range_requests: dict[tuple[str, date, date], Any] = {}
 
     @property
     def days_past(self) -> int:
@@ -144,6 +153,59 @@ class HelmPlanningCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
         self.window_end = end
         return data
 
+    async def _async_fetch_type(
+        self, kind: str, start: date, end: date
+    ) -> list[dict[str, Any]]:
+        """Fetch one planning type for a range, sharing work between callers.
+
+        Opening the calendar panel asks every calendar entity for the same
+        window at once, and the per-person calendars all need identical data.
+        Without this, ten entities would each fetch all five types and blow
+        through the API's 60 requests/minute. Identical fetches are collapsed
+        into one, and the result is briefly reused.
+        """
+        key = (kind, start, end)
+        now = self.hass.loop.time()
+
+        cached = self._range_cache.get(key)
+        if cached is not None and now - cached[0] < RANGE_CACHE_TTL:
+            return cached[1]
+
+        if (existing := self._range_requests.get(key)) is not None:
+            # An identical fetch is already in flight; wait for that one.
+            return await existing
+
+        # The task must resolve to the occurrences alone: callers waiting on an
+        # in-flight fetch get exactly what the originating caller gets.
+        async def _fetch() -> list[dict[str, Any]]:
+            occurrences, _meta = await self.client.async_get_planning(
+                PLANNING_ENDPOINTS[kind], start, end
+            )
+            return occurrences
+
+        task = self.hass.async_create_task(
+            _fetch(), name=f"{DOMAIN} fetch {kind} {start}..{end}"
+        )
+        self._range_requests[key] = task
+        try:
+            occurrences = await task
+        finally:
+            self._range_requests.pop(key, None)
+
+        self._prune_range_cache(now)
+        self._range_cache[key] = (now, occurrences)
+        return occurrences
+
+    def _prune_range_cache(self, now: float) -> None:
+        """Drop range results that are past their short lifetime."""
+        stale = [
+            key
+            for key, (stamp, _) in self._range_cache.items()
+            if now - stamp >= RANGE_CACHE_TTL
+        ]
+        for key in stale:
+            del self._range_cache[key]
+
     async def async_fetch_range(
         self, start: date, end: date, planning_types: list[str] | None = None
     ) -> list[dict[str, Any]]:
@@ -154,12 +216,9 @@ class HelmPlanningCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
             source = [item for kind in wanted for item in self.occurrences(kind)]
         else:
             results = await asyncio.gather(
-                *(
-                    self.client.async_get_planning(PLANNING_ENDPOINTS[kind], start, end)
-                    for kind in wanted
-                )
+                *(self._async_fetch_type(kind, start, end) for kind in wanted)
             )
-            source = [item for occurrences, _meta in results for item in occurrences]
+            source = [item for occurrences in results for item in occurrences]
 
         in_range = [
             item
