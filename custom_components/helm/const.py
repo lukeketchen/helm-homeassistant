@@ -13,6 +13,7 @@ CONF_DAYS_AHEAD: Final = "days_ahead"
 CONF_DAYS_PAST: Final = "days_past"
 CONF_UPDATE_INTERVAL: Final = "update_interval"
 CONF_QTY_IN_SUMMARY: Final = "qty_in_summary"
+CONF_SHOW_PEOPLE: Final = "show_people"
 CONF_ABILITIES: Final = "abilities"
 CONF_USER: Final = "user"
 CONF_TEAM: Final = "team"
@@ -23,6 +24,14 @@ DEFAULT_DAYS_AHEAD: Final = 7
 DEFAULT_DAYS_PAST: Final = 0
 DEFAULT_UPDATE_INTERVAL: Final = 5  # minutes
 DEFAULT_QTY_IN_SUMMARY: Final = True
+
+# How to show who an item is for on calendars that mix people together.
+SHOW_PEOPLE_OFF: Final = "off"
+SHOW_PEOPLE_SUFFIX: Final = "suffix"
+SHOW_PEOPLE_PREFIX: Final = "prefix"
+SHOW_PEOPLE_OPTIONS: Final = (SHOW_PEOPLE_OFF, SHOW_PEOPLE_SUFFIX, SHOW_PEOPLE_PREFIX)
+DEFAULT_SHOW_PEOPLE: Final = SHOW_PEOPLE_OFF
+PEOPLE_SEPARATOR: Final = " — "
 
 MIN_UPDATE_INTERVAL: Final = 1
 MAX_UPDATE_INTERVAL: Final = 1440

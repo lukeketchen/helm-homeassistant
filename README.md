@@ -40,6 +40,12 @@ Nothing is duplicated in Helm — it's the same occurrence, filtered per person.
 Who counts as attached depends on the type: meals and exercises use `owner` plus
 `participants`, events and chores use `assignees`, and habits use `owner`.
 
+If you'd rather read one merged agenda than several columns, the **Show who
+items are for** option adds names to titles on the Schedule and per-type
+calendars — `Chicken wrap — Luke`, or `Luke — Chicken wrap` if you prefer to
+scan down the left. Per-person calendars are left alone, since naming Luke on
+Luke's own calendar is just noise.
+
 The member list comes from `team.members` on `/me`, so calendars stay put
 whether or not someone has anything scheduled that week. People are keyed by
 type **and** ID — a `user` with ID 4 and a `family_member` with ID 4 are

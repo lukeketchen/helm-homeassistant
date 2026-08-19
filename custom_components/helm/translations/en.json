@@ -42,13 +42,15 @@
           "days_ahead": "Days ahead to load",
           "days_past": "Days of history to load",
           "update_interval": "Update interval",
-          "qty_in_summary": "Show quantity in shopping list item names"
+          "qty_in_summary": "Show quantity in shopping list item names",
+          "show_people": "Show who items are for"
         },
         "data_description": {
           "days_ahead": "How far forward the calendars and sensors keep data cached.",
           "days_past": "How far back to keep data cached, for looking at what already happened.",
           "update_interval": "How often to poll Helm. Each poll uses six requests against a 60/minute limit.",
-          "qty_in_summary": "Appends ×2 to an item's name, and reads a trailing ×2 back into the quantity when you add or rename an item."
+          "qty_in_summary": "Appends ×2 to an item's name, and reads a trailing ×2 back into the quantity when you add or rename an item.",
+          "show_people": "Adds names to event titles on the Schedule and per-type calendars. Per-person calendars never need it, so they are left alone."
         }
       }
     }
@@ -256,6 +258,15 @@
     "token_expiring": {
       "title": "Helm credential expiring soon",
       "description": "The Helm credential \"{credential}\" used by {name} expires at {expires_at}. Issue a new one in Helm under Settings → Account → API credentials, then reconfigure the integration to avoid losing your calendars and shopping list."
+    }
+  },
+  "selector": {
+    "show_people": {
+      "options": {
+        "off": "Don't show names",
+        "suffix": "After the title — Lunch — Luke",
+        "prefix": "Before the title — Luke — Lunch"
+      }
     }
   }
 }

@@ -10,7 +10,12 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.helm.calendar import occurrence_people, person_key
-from custom_components.helm.const import CONF_TEAM
+from custom_components.helm.const import (
+    CONF_SHOW_PEOPLE,
+    CONF_TEAM,
+    SHOW_PEOPLE_PREFIX,
+    SHOW_PEOPLE_SUFFIX,
+)
 
 from .conftest import JACK, LUKE, SAM, me_payload, mock_api, setup_helm
 
@@ -194,3 +199,94 @@ async def test_no_roster_means_no_person_calendars(
     assert hass.states.get("calendar.helm_schedule") is not None
     assert hass.states.get("calendar.helm_luke") is None
     assert hass.states.get("calendar.helm_household") is None
+
+
+async def _setup_with_people(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entry: MockConfigEntry,
+    mode: str,
+):
+    """Set the show_people option before the entry loads."""
+    entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(entry, options={CONF_SHOW_PEOPLE: mode})
+    return await setup_helm(hass, aioclient_mock, entry)
+
+
+async def test_names_are_off_by_default(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """Titles are untouched unless the option is turned on."""
+    today = await setup_helm(hass, aioclient_mock, config_entry)
+
+    assert "Chicken wrap" in await _summaries(hass, "calendar.helm_schedule", today)
+
+
+async def test_names_as_a_suffix(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """The merged calendar can say who each item is for."""
+    today = await _setup_with_people(
+        hass, aioclient_mock, config_entry, SHOW_PEOPLE_SUFFIX
+    )
+
+    summaries = await _summaries(hass, "calendar.helm_schedule", today)
+    assert "Chicken wrap — Luke" in summaries
+    assert "Sushi — Sam" in summaries
+    # Everyone attached is listed, in owner-then-participants order.
+    assert "Lasagne — Luke, Sam" in summaries
+    # Nobody attached means nothing to add.
+    assert "School concert" in summaries
+
+
+async def test_names_as_a_prefix(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """Prefixing makes a merged agenda easy to scan by person."""
+    today = await _setup_with_people(
+        hass, aioclient_mock, config_entry, SHOW_PEOPLE_PREFIX
+    )
+
+    assert "Luke — Chicken wrap" in await _summaries(
+        hass, "calendar.helm_schedule", today
+    )
+
+
+async def test_per_type_calendars_are_labelled_too(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """A Meals calendar mixes people, so it benefits from names as well."""
+    today = await _setup_with_people(
+        hass, aioclient_mock, config_entry, SHOW_PEOPLE_SUFFIX
+    )
+
+    assert "Sushi — Sam" in await _summaries(hass, "calendar.helm_meals", today)
+
+
+async def test_person_and_household_calendars_stay_clean(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """Naming Luke on Luke's own calendar would just be noise."""
+    today = await _setup_with_people(
+        hass, aioclient_mock, config_entry, SHOW_PEOPLE_SUFFIX
+    )
+
+    assert "Chicken wrap" in await _summaries(hass, "calendar.helm_luke", today)
+    assert await _summaries(hass, "calendar.helm_household", today) == {
+        "School concert"
+    }

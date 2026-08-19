@@ -19,6 +19,9 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
@@ -40,6 +43,7 @@ from .const import (
     CONF_DAYS_AHEAD,
     CONF_DAYS_PAST,
     CONF_QTY_IN_SUMMARY,
+    CONF_SHOW_PEOPLE,
     CONF_TEAM,
     CONF_TIMEZONE,
     CONF_UPDATE_INTERVAL,
@@ -48,12 +52,14 @@ from .const import (
     DEFAULT_DAYS_PAST,
     DEFAULT_NAME,
     DEFAULT_QTY_IN_SUMMARY,
+    DEFAULT_SHOW_PEOPLE,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     MAX_DAYS_AHEAD,
     MAX_DAYS_PAST,
     MAX_UPDATE_INTERVAL,
     MIN_UPDATE_INTERVAL,
+    SHOW_PEOPLE_OPTIONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -263,6 +269,16 @@ class HelmOptionsFlow(OptionsFlow):
                     CONF_QTY_IN_SUMMARY,
                     default=options.get(CONF_QTY_IN_SUMMARY, DEFAULT_QTY_IN_SUMMARY),
                 ): bool,
+                vol.Required(
+                    CONF_SHOW_PEOPLE,
+                    default=options.get(CONF_SHOW_PEOPLE, DEFAULT_SHOW_PEOPLE),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=list(SHOW_PEOPLE_OPTIONS),
+                        mode=SelectSelectorMode.DROPDOWN,
+                        translation_key=CONF_SHOW_PEOPLE,
+                    )
+                ),
             }
         )
 

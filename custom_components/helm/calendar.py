@@ -10,7 +10,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_TEAM, DEFAULT_EVENT_MINUTES, PLANNING_TYPES
+from .const import (
+    CONF_SHOW_PEOPLE,
+    CONF_TEAM,
+    DEFAULT_EVENT_MINUTES,
+    DEFAULT_SHOW_PEOPLE,
+    PEOPLE_SEPARATOR,
+    PLANNING_TYPES,
+    SHOW_PEOPLE_PREFIX,
+    SHOW_PEOPLE_SUFFIX,
+)
 from .coordinator import HelmPlanningCoordinator
 from .entity import HelmEntity
 
@@ -86,10 +95,25 @@ class HelmBaseCalendar(HelmEntity, CalendarEntity):
 
     coordinator: HelmPlanningCoordinator
 
+    # Calendars that mix people can label events with who they are for.
+    # A person's own calendar and the household one never need it.
+    _labels_people = True
+
     @property
     def _types(self) -> list[str]:
         """Planning types this calendar draws from."""
         return list(PLANNING_TYPES)
+
+    @property
+    def _show_people(self) -> str:
+        """How, if at all, to name people in event summaries."""
+        if not self._labels_people:
+            return "off"
+        return str(self._entry.options.get(CONF_SHOW_PEOPLE, DEFAULT_SHOW_PEOPLE))
+
+    def _event_from(self, occurrence: dict[str, Any]) -> CalendarEvent | None:
+        """Build a calendar event, honouring the people-labelling option."""
+        return _to_calendar_event(occurrence, self._show_people)
 
     def _include(self, occurrence: dict[str, Any]) -> bool:
         """Whether an occurrence belongs on this calendar."""
@@ -111,7 +135,7 @@ class HelmBaseCalendar(HelmEntity, CalendarEntity):
         upcoming: CalendarEvent | None = None
 
         for occurrence in self._cached_occurrences():
-            candidate = _to_calendar_event(occurrence)
+            candidate = self._event_from(occurrence)
             if candidate is None:
                 continue
             start, end = _as_datetimes(candidate, now.tzinfo)
@@ -141,7 +165,7 @@ class HelmBaseCalendar(HelmEntity, CalendarEntity):
         events = [
             event
             for occurrence in occurrences
-            if self._include(occurrence) and (event := _to_calendar_event(occurrence))
+            if self._include(occurrence) and (event := self._event_from(occurrence))
         ]
         return [event for event in events if _overlaps(event, start_date, end_date)]
 
@@ -186,6 +210,8 @@ class HelmPersonCalendar(HelmBaseCalendar):
     show on one each.
     """
 
+    _labels_people = False
+
     def __init__(
         self,
         coordinator: HelmPlanningCoordinator,
@@ -215,6 +241,7 @@ class HelmHouseholdCalendar(HelmBaseCalendar):
     """Occurrences that belong to nobody in particular."""
 
     _attr_translation_key = "calendar_household"
+    _labels_people = False
 
     def __init__(
         self, coordinator: HelmPlanningCoordinator, entry: HelmConfigEntry
@@ -246,10 +273,25 @@ def _overlaps(event: CalendarEvent, start: datetime, end: datetime) -> bool:
     return event_start < end and event_end > start
 
 
-def _to_calendar_event(occurrence: dict[str, Any]) -> CalendarEvent | None:
+def _summary(occurrence: dict[str, Any], show_people: str) -> str:
+    """Return the event title, optionally naming who it is for."""
+    title = occurrence.get("title") or "(untitled)"
+    if show_people not in (SHOW_PEOPLE_SUFFIX, SHOW_PEOPLE_PREFIX):
+        return title
+    people = _names(occurrence_people(occurrence))
+    if not people:
+        return title
+    if show_people == SHOW_PEOPLE_PREFIX:
+        return f"{people}{PEOPLE_SEPARATOR}{title}"
+    return f"{title}{PEOPLE_SEPARATOR}{people}"
+
+
+def _to_calendar_event(
+    occurrence: dict[str, Any], show_people: str = "off"
+) -> CalendarEvent | None:
     """Convert a Helm occurrence into a Home Assistant calendar event."""
     raw_date = occurrence.get("date")
-    title = occurrence.get("title") or "(untitled)"
+    title = _summary(occurrence, show_people)
     if not isinstance(raw_date, str):
         return None
     try:
