@@ -111,6 +111,23 @@ class HelmPlanningCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
         merged = [item for items in (self.data or {}).values() for item in items]
         return sorted(merged, key=_sort_key)
 
+    def apply_occurrence(self, planning_type: str, updated: dict[str, Any]) -> None:
+        """Replace one cached occurrence with a freshly returned copy.
+
+        Write endpoints hand back the updated occurrence in the standard shape,
+        so a tick costs one request rather than a full six-endpoint refresh.
+        """
+        if not (uid := updated.get("id")):
+            return
+        items = (self.data or {}).get(planning_type)
+        if items is None:
+            return
+
+        replaced = [
+            updated if str(item.get("id")) == str(uid) else item for item in items
+        ]
+        self.async_set_updated_data({**(self.data or {}), planning_type: replaced})
+
     async def async_set_timezone(self, name: str | None) -> None:
         """Seed the household timezone, normally from /me before the first poll."""
         if not name or name == self.timezone_name:

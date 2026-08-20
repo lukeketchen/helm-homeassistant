@@ -23,6 +23,7 @@ from homeassistant.util import dt as dt_util
 from .api import HelmAuthError, HelmClient, HelmError
 from .const import (
     ABILITY_PLANNING_READ,
+    ABILITY_PLANNING_WRITE,
     ABILITY_SHOPPING_READ,
     ABILITY_SHOPPING_WRITE,
     CONF_ABILITIES,
@@ -74,7 +75,7 @@ def _platforms_for(abilities: set[str]) -> list[Platform]:
     platforms: list[Platform] = []
     if ABILITY_PLANNING_READ in abilities:
         platforms.append(Platform.CALENDAR)
-    if ABILITY_SHOPPING_READ in abilities:
+    if ABILITY_SHOPPING_READ in abilities or ABILITY_PLANNING_WRITE in abilities:
         platforms.append(Platform.TODO)
     if abilities:
         platforms.append(Platform.SENSOR)
@@ -177,9 +178,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: HelmConfigEntry) -> bool
     platforms = _platforms_for(abilities)
     if not platforms:
         _LOGGER.warning(
-            "The Helm token has none of the %s, %s or %s abilities, so no entities "
-            "were created. Reissue it with the abilities you need",
+            "The Helm token has none of the %s, %s, %s or %s abilities, so no "
+            "entities were created. Reissue it with the abilities you need",
             ABILITY_PLANNING_READ,
+            ABILITY_PLANNING_WRITE,
             ABILITY_SHOPPING_READ,
             ABILITY_SHOPPING_WRITE,
         )

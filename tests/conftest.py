@@ -24,7 +24,12 @@ from custom_components.helm.const import (
 
 BASE_URL = "https://helm.test/api/v1"
 TOKEN = "helm_" + "a" * 68
-ALL_ABILITIES = ["planning:read", "shopping:read", "shopping:write"]
+ALL_ABILITIES = [
+    "planning:read",
+    "planning:write",
+    "shopping:read",
+    "shopping:write",
+]
 
 USER = {"id": 4, "name": "Luke", "role": "member"}
 
@@ -53,104 +58,146 @@ def _meta(today: date) -> dict[str, Any]:
     }
 
 
+def occurrence(
+    kind: str,
+    record_id: int,
+    title: str,
+    stamp: str,
+    *,
+    starts_at: str | None = None,
+    ends_at: str | None = None,
+    all_day: bool = False,
+    assignees: list[dict[str, Any]] | None = None,
+    details: dict[str, Any] | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Build an occurrence in the API's uniform shape.
+
+    Every endpoint returns the same core keys; per-type endpoints add to them
+    without reshaping. The composite `id` already identifies one occurrence on
+    one day, and `source.id` is the underlying record that write endpoints take.
+    """
+    return {
+        "id": f"{kind}:{record_id}:{stamp}",
+        "type": kind,
+        "title": title,
+        "date": stamp,
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "all_day": all_day,
+        "assignees": assignees if assignees is not None else [],
+        "details": details or {},
+        "source": {"type": kind, "id": record_id},
+        **extra,
+    }
+
+
 def planning_fixture(today: date) -> dict[str, list[dict[str, Any]]]:
     """Return occurrences covering shared, personal and unattributed items."""
     stamp = today.isoformat()
+    # `owner` carries no type key - it is always a user.
+    luke_owner = {"id": 4, "name": "Luke"}
+    sam_owner = {"id": 5, "name": "Sam"}
 
-    def meal(id_, title, hour, owner, participants):
-        return {
-            "id": id_,
-            "type": "meal",
-            "title": title,
-            "date": stamp,
-            "starts_at": f"{stamp}T{hour}:00+10:00",
-            "all_day": False,
-            "meal_time": "dinner" if hour.startswith("18") else "lunch",
-            "url": None,
-            "owner": owner,
-            "participants": participants,
-            "source": "meal_plan",
-        }
+    def meal(record_id, title, hour, owner, assignees):
+        meal_time = "dinner" if hour.startswith("18") else "lunch"
+        return occurrence(
+            "meal",
+            record_id,
+            title,
+            stamp,
+            starts_at=f"{stamp}T{hour}:00+10:00",
+            assignees=assignees,
+            details={"meal_time": meal_time, "url": None},
+            meal_time=meal_time,
+            url=None,
+            owner=owner,
+            participants=assignees,
+        )
 
     return {
         "meals": [
             # Eaten together - must appear on both Luke's and Sam's calendars.
-            meal(1, "Lasagne", "18:30", LUKE, [LUKE, LUKE_AS_FAMILY, SAM]),
+            meal(1, "Lasagne", "18:30", luke_owner, [LUKE, LUKE_AS_FAMILY, SAM]),
             # Separate lunches - one calendar each.
-            meal(2, "Chicken wrap", "12:30", LUKE, [LUKE, LUKE_AS_FAMILY]),
-            meal(3, "Sushi", "12:30", SAM, [SAM]),
+            meal(2, "Chicken wrap", "12:30", luke_owner, [LUKE, LUKE_AS_FAMILY]),
+            meal(3, "Sushi", "12:30", sam_owner, [SAM]),
         ],
         "exercises": [
-            {
-                "id": 10,
-                "type": "exercise",
-                "title": "Run",
-                "date": stamp,
-                "starts_at": f"{stamp}T06:00:00+10:00",
-                "all_day": False,
-                "duration_minutes": 45,
-                "subtype": "cardio",
-                "category": "running",
-                "owner": LUKE,
-                "participants": [],
-                "source": "routine",
-            },
-            {
-                "id": 11,
-                "type": "exercise",
-                "title": "Yoga",
-                "date": stamp,
-                "starts_at": f"{stamp}T16:15:00+10:00",
-                "all_day": False,
-                "duration_minutes": 60,
-                "subtype": None,
-                "category": None,
-                "owner": SAM,
-                "participants": [SAM],
-                "source": "routine",
-            },
+            occurrence(
+                "exercise",
+                10,
+                "Run",
+                stamp,
+                starts_at=f"{stamp}T06:00:00+10:00",
+                assignees=[LUKE],
+                details={
+                    "duration_minutes": 45,
+                    "subtype": "cardio",
+                    "category": "running",
+                },
+                duration_minutes=45,
+                subtype="cardio",
+                category="running",
+                owner=luke_owner,
+                participants=[LUKE],
+            ),
+            occurrence(
+                "exercise",
+                11,
+                "Yoga",
+                stamp,
+                starts_at=f"{stamp}T16:15:00+10:00",
+                assignees=[SAM],
+                details={
+                    "duration_minutes": 60,
+                    "subtype": None,
+                    "category": None,
+                },
+                duration_minutes=60,
+                subtype=None,
+                category=None,
+                owner=sam_owner,
+                participants=[SAM],
+            ),
         ],
         "events": [
             # Nobody assigned - belongs on the household calendar.
-            {
-                "id": 20,
-                "type": "event",
-                "title": "School concert",
-                "date": stamp,
-                "starts_at": None,
-                "ends_at": None,
-                "all_day": True,
-                "color": "#ff0000",
-                "assignees": [],
-                "source": "calendar",
-            }
+            occurrence(
+                "event",
+                20,
+                "School concert",
+                stamp,
+                all_day=True,
+                assignees=[],
+                details={"color": "#ff0000"},
+                color="#ff0000",
+            )
         ],
         "chores": [
-            {
-                "id": 12,
-                "type": "chore",
-                "title": "Bins out",
-                "date": stamp,
-                "starts_at": f"{stamp}T19:00:00+10:00",
-                "all_day": False,
-                "completed": False,
-                "assignees": [JACK],
-                "source": "chores",
-            }
+            occurrence(
+                "chore",
+                12,
+                "Bins out",
+                stamp,
+                starts_at=f"{stamp}T19:00:00+10:00",
+                assignees=[JACK],
+                details={"completed": False},
+                completed=False,
+            )
         ],
         "habits": [
-            # Habits now carry an owner, always the token owner.
-            {
-                "id": 7,
-                "type": "habit",
-                "title": "Read",
-                "date": stamp,
-                "starts_at": None,
-                "all_day": True,
-                "completed": True,
-                "owner": LUKE,
-                "source": "habits",
-            }
+            occurrence(
+                "habit",
+                7,
+                "Read",
+                stamp,
+                all_day=True,
+                assignees=[LUKE],
+                details={"completed": True},
+                completed=True,
+                owner=luke_owner,
+            )
         ],
     }
 
@@ -220,6 +267,7 @@ def mock_api(
         abilities = []
         if planning:
             abilities.append("planning:read")
+            abilities.append("planning:write")
         if shopping:
             abilities.append("shopping:read")
         if shopping and write:

@@ -62,6 +62,7 @@ async def test_me_populates_the_entry(
     data = result["data"]
     assert data[CONF_ABILITIES] == [
         "planning:read",
+        "planning:write",
         "shopping:read",
         "shopping:write",
     ]

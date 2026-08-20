@@ -42,17 +42,25 @@ def occurrence_people(occurrence: dict[str, Any]) -> list[dict[str, Any]]:
     Meals and exercises carry `owner` plus `participants`, events and chores
     carry `assignees`, and habits carry `owner` alone.
     """
-    people: dict[str, dict[str, Any]] = {}
+    # `assignees` is present on every occurrence and already resolves the
+    # per-type rules: participants for meals and exercises, falling back to the
+    # owner, and the owner for habits. An empty list genuinely means nobody.
+    if "assignees" in occurrence:
+        return [
+            person
+            for person in occurrence.get("assignees") or []
+            if isinstance(person, dict) and person.get("id") is not None
+        ]
 
+    # Older servers, before assignees was added to every endpoint. `owner`
+    # carries no type key, so it can only contribute a name.
+    people: dict[str, dict[str, Any]] = {}
     owner = occurrence.get("owner")
     if isinstance(owner, dict) and owner.get("id") is not None:
         people[person_key(owner)] = owner
-
-    for field in ("participants", "assignees"):
-        for person in occurrence.get(field) or []:
-            if isinstance(person, dict) and person.get("id") is not None:
-                people.setdefault(person_key(person), person)
-
+    for person in occurrence.get("participants") or []:
+        if isinstance(person, dict) and person.get("id") is not None:
+            people.setdefault(person_key(person), person)
     return list(people.values())
 
 
@@ -361,7 +369,15 @@ def _to_calendar_event(
     except ValueError:
         return None
 
-    uid = f"{occurrence.get('type')}-{occurrence.get('id')}-{raw_date}"
+    # `id` is a composite - "chore:12:2026-08-18" - so it already identifies a
+    # single occurrence on a single day. Older servers sent a bare record ID
+    # shared across a recurrence, which needs the date appending.
+    raw_id = occurrence.get("id")
+    uid = (
+        str(raw_id)
+        if isinstance(raw_id, str) and ":" in raw_id
+        else f"{occurrence.get('type')}-{raw_id}-{raw_date}"
+    )
     description = _describe(occurrence)
 
     starts_at = occurrence.get("starts_at")
@@ -382,7 +398,9 @@ def _to_calendar_event(
     if ends_at := occurrence.get("ends_at"):
         end = dt_util.parse_datetime(ends_at)
     if end is None:
-        minutes = occurrence.get("duration_minutes") or DEFAULT_EVENT_MINUTES
+        minutes = (
+            occurrence_field(occurrence, "duration_minutes") or DEFAULT_EVENT_MINUTES
+        )
         end = start + timedelta(minutes=int(minutes))
     if end <= start:
         end = start + timedelta(minutes=DEFAULT_EVENT_MINUTES)
@@ -412,29 +430,53 @@ def _names(people: list[dict[str, Any]]) -> str:
     return ", ".join(distinct_names(people))
 
 
+def occurrence_field(occurrence: dict[str, Any], name: str) -> Any:
+    """Read a type-specific field from wherever this server puts it.
+
+    The per-type endpoints carry these at the top level; `/schedule` gathers
+    them under `details`. Either way the caller just asks for the field.
+    """
+    if (value := occurrence.get(name)) is not None:
+        return value
+    details = occurrence.get("details")
+    return details.get(name) if isinstance(details, dict) else None
+
+
+def source_type(occurrence: dict[str, Any]) -> str | None:
+    """Return which Helm feature produced this occurrence."""
+    source = occurrence.get("source")
+    if isinstance(source, dict):
+        value = source.get("type")
+        return str(value) if value else None
+    return str(source) if source else None
+
+
+def source_record_id(occurrence: dict[str, Any]) -> Any:
+    """Return the underlying record's own ID, which write endpoints take."""
+    source = occurrence.get("source")
+    return source.get("id") if isinstance(source, dict) else None
+
+
 def _describe(occurrence: dict[str, Any]) -> str | None:
     """Build a readable description from the type-specific fields."""
     lines: list[str] = []
-    kind = occurrence.get("type")
-    if kind:
+    if kind := occurrence.get("type"):
         lines.append(f"Type: {kind}")
-    if meal_time := occurrence.get("meal_time"):
+    if meal_time := occurrence_field(occurrence, "meal_time"):
         lines.append(f"Meal: {meal_time}")
-    if category := occurrence.get("category"):
+    if category := occurrence_field(occurrence, "category"):
         lines.append(f"Category: {category}")
-    if subtype := occurrence.get("subtype"):
+    if subtype := occurrence_field(occurrence, "subtype"):
         lines.append(f"Subtype: {subtype}")
-    if (duration := occurrence.get("duration_minutes")) is not None:
+    if (duration := occurrence_field(occurrence, "duration_minutes")) is not None:
         lines.append(f"Duration: {duration} min")
-    if (completed := occurrence.get("completed")) is not None:
+    if (completed := occurrence_field(occurrence, "completed")) is not None:
         lines.append("Completed: yes" if completed else "Completed: no")
     if people := _names(occurrence_people(occurrence)):
         lines.append(f"Who: {people}")
-    if details := occurrence.get("details"):
-        lines.append(str(details))
-    if url := occurrence.get("url"):
+    if url := occurrence_field(occurrence, "url"):
         lines.append(str(url))
-    if source := occurrence.get("source"):
+    if source := source_type(occurrence):
         lines.append(f"Source: {source}")
 
     return "\n".join(lines) or None

@@ -85,6 +85,12 @@
     "todo": {
       "shopping_list": {
         "name": "Shopping list"
+      },
+      "todo_chore": {
+        "name": "Chores today"
+      },
+      "todo_habit": {
+        "name": "Habits today"
       }
     },
     "sensor": {

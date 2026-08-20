@@ -42,6 +42,7 @@ async def test_full_flow_records_every_ability(
     assert result["data"][CONF_API_TOKEN] == TOKEN
     assert result["data"][CONF_ABILITIES] == [
         "planning:read",
+        "planning:write",
         "shopping:read",
         "shopping:write",
     ]

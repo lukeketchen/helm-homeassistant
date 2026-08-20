@@ -10,7 +10,7 @@ from typing import Any, Final
 from aiohttp import ClientError, ClientResponse, ClientSession, ClientTimeout
 from homeassistant.util.json import json_loads
 
-from .const import MAX_RANGE_DAYS, ME_PATH, SHOPPING_ITEMS_PATH
+from .const import COMPLETABLE_TYPES, MAX_RANGE_DAYS, ME_PATH, SHOPPING_ITEMS_PATH
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -218,6 +218,27 @@ class HelmClient:
             if not meta and isinstance(payload.get("meta"), dict):
                 meta = payload["meta"]
         return occurrences, meta
+
+    async def async_set_occurrence_completed(
+        self, kind: str, record_id: int | str, day: date, completed: bool
+    ) -> dict[str, Any]:
+        """Tick a chore or habit occurrence off, or clear it.
+
+        `record_id` is the underlying record - `source.id` on an occurrence -
+        not the occurrence's own composite ID. Idempotent in both directions,
+        so a retry is safe without checking the current state first.
+        """
+        endpoint = COMPLETABLE_TYPES.get(kind)
+        if endpoint is None:
+            raise HelmError(f"{kind} occurrences cannot be completed")
+
+        payload = await self._request(
+            "PATCH",
+            f"/{endpoint}/{record_id}/occurrences/{day.isoformat()}",
+            body={"completed": completed},
+        )
+        data = payload.get("data") if isinstance(payload, dict) else None
+        return data if isinstance(data, dict) else {}
 
     async def async_get_shopping_items(self) -> list[dict[str, Any]]:
         """Return every shopping list item visible to this token."""

@@ -17,12 +17,15 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .api import HelmError
+from .calendar import source_record_id
 from .const import (
+    ABILITY_PLANNING_WRITE,
     ABILITY_SHOPPING_WRITE,
+    COMPLETABLE_TYPES,
     CONF_QTY_IN_SUMMARY,
     DEFAULT_QTY_IN_SUMMARY,
 )
-from .coordinator import HelmShoppingCoordinator
+from .coordinator import HelmPlanningCoordinator, HelmShoppingCoordinator
 from .entity import HelmEntity
 
 if TYPE_CHECKING:
@@ -38,10 +41,21 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the shopping list to-do entity."""
-    coordinator = entry.runtime_data.shopping
-    if coordinator is None:
-        return
-    async_add_entities([HelmShoppingListEntity(coordinator, entry)])
+    entities: list[TodoListEntity] = []
+
+    if (shopping := entry.runtime_data.shopping) is not None:
+        entities.append(HelmShoppingListEntity(shopping, entry))
+
+    # Ticking chores and habits off needs the planning:write ability; without
+    # it a to-do list would render checkboxes that cannot be checked.
+    planning = entry.runtime_data.planning
+    if planning is not None and ABILITY_PLANNING_WRITE in entry.runtime_data.abilities:
+        entities.extend(
+            HelmOccurrenceTodoEntity(planning, entry, kind)
+            for kind in COMPLETABLE_TYPES
+        )
+
+    async_add_entities(entities)
 
 
 class HelmShoppingListEntity(HelmEntity, TodoListEntity):
@@ -184,3 +198,94 @@ class HelmShoppingListEntity(HelmEntity, TodoListEntity):
                 ) from err
 
         await self.coordinator.async_request_refresh()
+
+
+class HelmOccurrenceTodoEntity(HelmEntity, TodoListEntity):
+    """Today's chores or habits, as a list that can be ticked off.
+
+    Scoped to today on purpose: a to-do list is flat, so a daily chore over the
+    coordinator's whole window would appear once per day. The range view is the
+    calendar entity's job.
+
+    Only UPDATE_TODO_ITEM is advertised, because Helm creates, renames and
+    deletes chores and habits itself - the API exposes no way to do it here.
+    """
+
+    coordinator: HelmPlanningCoordinator
+    _attr_supported_features = TodoListEntityFeature.UPDATE_TODO_ITEM
+    _unrecorded_attributes = frozenset({"items"})
+
+    def __init__(
+        self,
+        coordinator: HelmPlanningCoordinator,
+        entry: HelmConfigEntry,
+        planning_type: str,
+    ) -> None:
+        """Initialise the list."""
+        super().__init__(coordinator, entry, f"todo_{planning_type}")
+        self._planning_type = planning_type
+        self._attr_translation_key = f"todo_{planning_type}"
+
+    def _today(self) -> list[dict[str, Any]]:
+        """Return today's occurrences of this type."""
+        stamp = self.coordinator.today().isoformat()
+        return [
+            occurrence
+            for occurrence in self.coordinator.occurrences(self._planning_type)
+            if occurrence.get("date") == stamp
+        ]
+
+    @property
+    def todo_items(self) -> list[TodoItem] | None:
+        """Return today's items."""
+        if self.coordinator.data is None:
+            return None
+        return [
+            TodoItem(
+                uid=str(occurrence.get("id")),
+                summary=str(occurrence.get("title") or ""),
+                status=(
+                    TodoItemStatus.COMPLETED
+                    if occurrence.get("completed")
+                    else TodoItemStatus.NEEDS_ACTION
+                ),
+            )
+            for occurrence in self._today()
+        ]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the full occurrences behind the list."""
+        return {"items": self._today()}
+
+    async def async_update_todo_item(self, item: TodoItem) -> None:
+        """Tick an occurrence off, or clear it.
+
+        Home Assistant sends the whole item back including the summary, but
+        renaming is not supported server-side, so only the status is read.
+        """
+        occurrence = next(
+            (occ for occ in self._today() if str(occ.get("id")) == item.uid), None
+        )
+        if occurrence is None:
+            raise HomeAssistantError(f"{item.summary} is no longer on today's list")
+
+        record_id = source_record_id(occurrence)
+        if record_id is None:
+            raise HomeAssistantError(f"{item.summary} has no source record to update")
+
+        day = self.coordinator.today()
+        completed = item.status == TodoItemStatus.COMPLETED
+
+        try:
+            updated = await self.coordinator.client.async_set_occurrence_completed(
+                self._planning_type, record_id, day, completed
+            )
+        except HelmError as err:
+            raise HomeAssistantError(
+                f"Could not update '{item.summary}': {err.message}"
+            ) from err
+
+        # The response is a full occurrence, so the local copy can be replaced
+        # outright instead of spending six requests on a refresh.
+        self.coordinator.apply_occurrence(self._planning_type, updated or occurrence)

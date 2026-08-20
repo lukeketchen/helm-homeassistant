@@ -15,7 +15,7 @@ in `configuration.yaml` or `secrets.yaml`.
 | Platform | Entities |
 |---|---|
 | **Calendar** | One per household member, plus Household, a merged Schedule, and one per type (meals, exercise, events, chores, habits) |
-| **To-do** | `todo.helm_shopping_list` — the shared household list, with add, rename, tick and delete |
+| **To-do** | `todo.helm_shopping_list` (add, rename, tick, delete) plus `todo.helm_chores_today` and `todo.helm_habits_today` (tick only) |
 | **Sensor** | Next up, today's totals per type, chores/habits still outstanding, shopping list counts, credential expiry |
 | **Card** | `custom:helm-shopping-card` — a shopping list card with quantities, categories and recipe links |
 
@@ -135,7 +135,8 @@ directory and restart.
 
    | Ability | Unlocks |
    |---|---|
-   | `planning:read` | The six calendars and the planning sensors |
+   | `planning:read` | The calendars and the planning sensors |
+| `planning:write` | Ticking chores and habits off from Home Assistant |
    | `shopping:read` | The to-do list, read-only |
    | `shopping:write` | Adding, renaming, ticking and deleting to-do items |
 
@@ -220,7 +221,25 @@ Shopping List* after a restart — no manual Lovelace resource, and no second HA
 repository. It has a visual editor, and no external dependencies (it never
 fetches from a CDN).
 
-### The to-do entity
+### Chores and habits
+
+`todo.helm_chores_today` and `todo.helm_habits_today` hold **today's**
+occurrences and support ticking only — Helm creates, renames and deletes these
+itself, so the stock to-do card shows checkboxes with no "Add item" field and no
+"Clear completed" button.
+
+Today-only is deliberate: a to-do list is flat, so a daily chore drawn from the
+whole polled window would appear once per day. The range view is the calendar's
+job.
+
+Ticking writes straight to the occurrence and applies the response to local
+state, so a tick costs **one** request rather than a full refresh. It is
+idempotent in both directions, so a retry is safe.
+
+These entities need the `planning:write` ability. An existing `planning:read`
+token cannot write — issue a new credential with both ticked and reconnect.
+
+### The shopping list to-do entity
 
 Still worth keeping, because it's what Assist voice control, the standard to-do
 card and every `todo.*` service speak. The mapping:
@@ -380,8 +399,18 @@ Add to the shopping list by voice, via the standard to-do intents:
   and briefly reused, so a month view across ten calendars costs ten requests
   rather than sixty. Raising **Days ahead** to 30 makes most month views free
   entirely, at no extra polling cost.
-- **Recurring occurrences.** `id` repeats across days, so calendar UIDs are
-  `{type}-{id}-{date}`.
+- **Occurrence IDs are composite** — `chore:12:2026-08-18` — so they identify a
+  single occurrence on a single day and are used directly as calendar UIDs. A
+  server still sending a bare record ID gets the date appended instead.
+- **`source` is an object** `{type, id}`. Its `id` is the underlying record,
+  which is what the tick-off endpoints take — not the occurrence ID.
+- **Type-specific fields** are read from the top level or from `details`,
+  whichever the endpoint provides, so per-type and `/schedule` responses parse
+  identically.
+- **`assignees` decides who an item belongs to.** It is present on every
+  occurrence and already resolves the per-type rules (participants for meals and
+  exercises, falling back to the owner; the owner for habits). `owner` and
+  `participants` are only consulted on older servers that predate it.
 - **Rate limits and errors** surface as `UpdateFailed` (entities go unavailable
   and retry) or, for auth failures, as a reauth prompt.
 

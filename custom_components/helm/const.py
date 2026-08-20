@@ -47,6 +47,7 @@ EXPIRY_WARNING_DAYS: Final = 14
 ISSUE_TOKEN_EXPIRING: Final = "token_expiring"
 
 ABILITY_PLANNING_READ: Final = "planning:read"
+ABILITY_PLANNING_WRITE: Final = "planning:write"
 ABILITY_SHOPPING_READ: Final = "shopping:read"
 ABILITY_SHOPPING_WRITE: Final = "shopping:write"
 
@@ -63,6 +64,9 @@ PLANNING_TYPES: Final = tuple(PLANNING_ENDPOINTS)
 
 SHOPPING_ITEMS_PATH: Final = "/shopping-list/items"
 ME_PATH: Final = "/me"
+
+# Occurrence types that can be ticked off, mapped to their write endpoint.
+COMPLETABLE_TYPES: Final[dict[str, str]] = {"chore": "chores", "habit": "habits"}
 
 # Fallback length for a timed occurrence with no end and no duration.
 DEFAULT_EVENT_MINUTES: Final = 60
