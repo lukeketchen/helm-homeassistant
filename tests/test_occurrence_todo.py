@@ -220,3 +220,136 @@ async def test_no_lists_without_planning_write(
     assert hass.states.get("calendar.helm_schedule") is not None
     assert hass.states.get(CHORES) is None
     assert hass.states.get(HABITS) is None
+
+
+def _response(
+    stamp: str, *, completed: bool, uid: str | None = None, nested_only=False
+):
+    """Build a PATCH response describing a chore occurrence."""
+    occurrence = {
+        "id": uid or f"chore:12:{stamp}",
+        "type": "chore",
+        "title": "Bins out",
+        "date": stamp,
+        "starts_at": None,
+        "ends_at": None,
+        "all_day": True,
+        "assignees": [],
+        "details": {"completed": completed},
+        "source": {"type": "chore", "id": 12},
+    }
+    if not nested_only:
+        occurrence["completed"] = completed
+    return {"data": occurrence}
+
+
+async def test_completed_is_read_from_details_too(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """A response nesting completed under details must still register."""
+    today = await setup_helm(hass, aioclient_mock, config_entry)
+    stamp = today.isoformat()
+    aioclient_mock.patch(
+        f"{BASE_URL}/chores/12/occurrences/{stamp}",
+        json=_response(stamp, completed=True, nested_only=True),
+    )
+
+    await hass.services.async_call(
+        "todo",
+        "update_item",
+        {"entity_id": CHORES, "item": "Bins out", "status": "completed"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert (await _items(hass, CHORES))[0]["status"] == "completed"
+
+
+async def test_the_date_comes_from_the_occurrence(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """The occurrence knows its own day; today is not recomputed."""
+    today = await setup_helm(hass, aioclient_mock, config_entry)
+    stamp = today.isoformat()
+    aioclient_mock.patch(
+        f"{BASE_URL}/chores/12/occurrences/{stamp}",
+        json=_response(stamp, completed=True),
+    )
+
+    await hass.services.async_call(
+        "todo",
+        "update_item",
+        {"entity_id": CHORES, "item": "Bins out", "status": "completed"},
+        blocking=True,
+    )
+
+    patch = next(
+        c for c in reversed(aioclient_mock.mock_calls) if c[0].lower() == "patch"
+    )
+    # The date in the path is the occurrence's own date.
+    assert patch[1].path.endswith(f"/occurrences/{stamp}")
+
+
+async def test_a_response_for_another_occurrence_triggers_a_refetch(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """Local state must never claim a tick the server did not describe.
+
+    If the response is for a different occurrence, showing it as done would be
+    a lie - Home Assistant ticked, Helm did not.
+    """
+    today = await setup_helm(hass, aioclient_mock, config_entry)
+    stamp = today.isoformat()
+    aioclient_mock.patch(
+        f"{BASE_URL}/chores/12/occurrences/{stamp}",
+        json=_response(stamp, completed=True, uid="chore:99:2020-01-01"),
+    )
+    aioclient_mock.mock_calls.clear()
+
+    await hass.services.async_call(
+        "todo",
+        "update_item",
+        {"entity_id": CHORES, "item": "Bins out", "status": "completed"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    methods = [c[0].lower() for c in aioclient_mock.mock_calls]
+    assert "get" in methods, "a mismatched response should force a refetch"
+
+
+async def test_a_response_denying_the_change_triggers_a_refetch(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    config_entry: MockConfigEntry,
+    enable_custom_integrations,
+) -> None:
+    """A 200 that still says not-completed must not show as completed."""
+    today = await setup_helm(hass, aioclient_mock, config_entry)
+    stamp = today.isoformat()
+    aioclient_mock.patch(
+        f"{BASE_URL}/chores/12/occurrences/{stamp}",
+        json=_response(stamp, completed=False),
+    )
+    aioclient_mock.mock_calls.clear()
+
+    await hass.services.async_call(
+        "todo",
+        "update_item",
+        {"entity_id": CHORES, "item": "Bins out", "status": "completed"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    methods = [c[0].lower() for c in aioclient_mock.mock_calls]
+    assert "get" in methods, "an unconfirmed tick should force a refetch"
+    assert (await _items(hass, CHORES))[0]["status"] == "needs_action"

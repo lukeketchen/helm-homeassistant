@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+import logging
 import re
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -17,7 +19,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .api import HelmError
-from .calendar import source_record_id
+from .calendar import occurrence_field, source_record_id
 from .const import (
     ABILITY_PLANNING_WRITE,
     ABILITY_SHOPPING_WRITE,
@@ -30,6 +32,8 @@ from .entity import HelmEntity
 
 if TYPE_CHECKING:
     from . import HelmConfigEntry
+
+_LOGGER = logging.getLogger(__name__)
 
 # Matches a trailing quantity written as "x2", "×2" or "*2".
 _QTY_SUFFIX = re.compile(r"\s*[x×*]\s*(\d{1,4})\s*$", re.IGNORECASE)
@@ -246,7 +250,7 @@ class HelmOccurrenceTodoEntity(HelmEntity, TodoListEntity):
                 summary=str(occurrence.get("title") or ""),
                 status=(
                     TodoItemStatus.COMPLETED
-                    if occurrence.get("completed")
+                    if occurrence_field(occurrence, "completed")
                     else TodoItemStatus.NEEDS_ACTION
                 ),
             )
@@ -274,8 +278,25 @@ class HelmOccurrenceTodoEntity(HelmEntity, TodoListEntity):
         if record_id is None:
             raise HomeAssistantError(f"{item.summary} has no source record to update")
 
-        day = self.coordinator.today()
+        # Take the date from the occurrence itself rather than recomputing
+        # "today". The occurrence knows which day it is for, and a daily item
+        # ticked under a skewed clock would otherwise complete the wrong date.
+        raw_date = occurrence.get("date")
+        try:
+            day = date.fromisoformat(str(raw_date))
+        except (TypeError, ValueError):
+            day = self.coordinator.today()
+
         completed = item.status == TodoItemStatus.COMPLETED
+
+        _LOGGER.debug(
+            "Completing %s occurrence uid=%s record=%s date=%s completed=%s",
+            self._planning_type,
+            item.uid,
+            record_id,
+            day,
+            completed,
+        )
 
         try:
             updated = await self.coordinator.client.async_set_occurrence_completed(
@@ -286,6 +307,20 @@ class HelmOccurrenceTodoEntity(HelmEntity, TodoListEntity):
                 f"Could not update '{item.summary}': {err.message}"
             ) from err
 
-        # The response is a full occurrence, so the local copy can be replaced
-        # outright instead of spending six requests on a refresh.
-        self.coordinator.apply_occurrence(self._planning_type, updated or occurrence)
+        # The response is a full occurrence, so the local copy can normally be
+        # replaced outright instead of spending six requests on a refresh. If it
+        # does not describe what was ticked, or does not agree that the change
+        # took, refetch rather than showing state the server does not share.
+        applied = bool(updated) and self.coordinator.apply_occurrence(
+            self._planning_type, updated
+        )
+        if applied and bool(occurrence_field(updated, "completed")) == completed:
+            return
+
+        _LOGGER.warning(
+            "Helm did not confirm '%s' as %s; refetching. Response: %s",
+            item.summary,
+            "completed" if completed else "not completed",
+            updated,
+        )
+        await self.coordinator.async_request_refresh()

@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
+from .calendar import occurrence_field
 from .const import CONF_BASE_URL, PLANNING_ENDPOINTS, PLANNING_TYPES
 from .coordinator import HelmPlanningCoordinator, HelmShoppingCoordinator
 from .entity import HelmEntity, helm_device_info
@@ -66,7 +67,7 @@ def _summarise(occurrences: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "date": occurrence.get("date"),
             "starts_at": occurrence.get("starts_at"),
             "all_day": occurrence.get("all_day"),
-            "completed": occurrence.get("completed"),
+            "completed": occurrence_field(occurrence, "completed"),
         }
         for occurrence in occurrences
     ]
@@ -161,7 +162,7 @@ PLANNING_SENSORS: tuple[HelmPlanningSensorDescription, ...] = (
                 lambda coordinator, today, planning_type=kind: sum(
                     1
                     for occurrence in _today_items(coordinator, today, planning_type)
-                    if not occurrence.get("completed")
+                    if not occurrence_field(occurrence, "completed")
                 )
             ),
             attrs_fn=(
@@ -172,7 +173,7 @@ PLANNING_SENSORS: tuple[HelmPlanningSensorDescription, ...] = (
                             for occurrence in _today_items(
                                 coordinator, today, planning_type
                             )
-                            if not occurrence.get("completed")
+                            if not occurrence_field(occurrence, "completed")
                         ]
                     )
                 }

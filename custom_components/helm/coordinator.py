@@ -111,22 +111,34 @@ class HelmPlanningCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any
         merged = [item for items in (self.data or {}).values() for item in items]
         return sorted(merged, key=_sort_key)
 
-    def apply_occurrence(self, planning_type: str, updated: dict[str, Any]) -> None:
+    def apply_occurrence(self, planning_type: str, updated: dict[str, Any]) -> bool:
         """Replace one cached occurrence with a freshly returned copy.
 
         Write endpoints hand back the updated occurrence in the standard shape,
         so a tick costs one request rather than a full six-endpoint refresh.
+
+        Returns whether a cached occurrence actually matched. A False here means
+        the response described something other than what was on screen, and the
+        caller should refetch rather than trust local state.
         """
         if not (uid := updated.get("id")):
-            return
+            return False
         items = (self.data or {}).get(planning_type)
         if items is None:
-            return
+            return False
 
-        replaced = [
-            updated if str(item.get("id")) == str(uid) else item for item in items
-        ]
-        self.async_set_updated_data({**(self.data or {}), planning_type: replaced})
+        matched = False
+        replaced = []
+        for item in items:
+            if str(item.get("id")) == str(uid):
+                matched = True
+                replaced.append(updated)
+            else:
+                replaced.append(item)
+
+        if matched:
+            self.async_set_updated_data({**(self.data or {}), planning_type: replaced})
+        return matched
 
     async def async_set_timezone(self, name: str | None) -> None:
         """Seed the household timezone, normally from /me before the first poll."""
